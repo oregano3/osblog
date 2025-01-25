@@ -3,17 +3,14 @@
 // 21 Sep 2019
 #![no_main]
 #![no_std]
-#![feature(panic_info_message,
-           asm,
-		   llvm_asm,
-		   global_asm,
-           allocator_api,
+#![feature(allocator_api,
            alloc_error_handler,
-           alloc_prelude,
-		   const_raw_ptr_to_usize_cast,
-		   lang_items)]
+           //alloc_prelude,
+		       lang_items)]
 
-#[lang = "eh_personality"] extern fn eh_personality() {}
+use core::arch::asm;
+
+#[lang = "eh_personality"] extern "C" fn eh_personality() {}
 
 // #[macro_use]
 extern crate alloc;
@@ -57,7 +54,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 		         "line {}, file {}: {}",
 		         p.line(),
 		         p.file(),
-		         info.message().unwrap()
+		         info.message()
 		);
 	}
 	else {
@@ -69,7 +66,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 extern "C" fn abort() -> ! {
 	loop {
 		unsafe {
-			llvm_asm!("wfi"::::"volatile");
+			asm!("wfi", options(nomem, nostack));
 		}
 	}
 }
