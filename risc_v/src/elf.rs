@@ -6,7 +6,7 @@
 
 use crate::{buffer::Buffer,
             cpu::{build_satp, memcpy, satp_fence_asid, CpuMode, Registers, SatpMode, TrapFrame},
-            page::{map, zalloc, EntryBits, Table, PAGE_SIZE},
+            page::{map, zalloc, EntryBits, Table, PAGE_SIZE, align_val},
             process::{Process, ProcessData, ProcessState, NEXT_PID, STACK_ADDR, STACK_PAGES}};
 use alloc::collections::VecDeque;
 // Every ELF file starts with ELF "magic", which is a sequence of four bytes 0x7f followed by capital ELF, which is 0x45, 0x4c, and 0x46 respectively.
@@ -193,7 +193,7 @@ impl File {
 			}
 			// Now we map the program counter. The virtual address
 			// is provided in the ELF program header.
-			let pages = (p.header.memsz + PAGE_SIZE) / PAGE_SIZE;
+			let pages = (PAGE_SIZE + align_val(p.header.memsz, 12)) / PAGE_SIZE;
 			for i in 0..pages {
 				let vaddr = p.header.vaddr + i * PAGE_SIZE;
 				// The ELF specifies a paddr, but not when we
