@@ -8,7 +8,7 @@ use crate::{cpu::{TrapFrame, CONTEXT_SWITCH_TIME},
             process::delete_process,
             rust_switch_to_user,
             sched::schedule,
-            syscall::do_syscall};
+            syscall::{user_syscall, machine_syscall}};
 
 #[no_mangle]
 /// The m_trap stands for "machine trap". Right now, we are handling
@@ -21,7 +21,6 @@ extern "C" fn m_trap(epc: usize,
                      hart: usize,
                      _status: usize,
                      frame: *mut TrapFrame)
-                     -> usize
 {
 	// We're going to handle all traps in machine mode. RISC-V lets
 	// us delegate to supervisor mode, but switching out SATP (virtual memory)
@@ -37,7 +36,6 @@ extern "C" fn m_trap(epc: usize,
 	// The cause contains the type of trap (sync, async) as well as the cause
 	// number. So, here we narrow down just the cause number.
 	let cause_num = cause & 0xfff;
-	let mut return_pc = epc;
 	if is_async {
 		// Asynchronous trap
 		match cause_num {
@@ -82,68 +80,50 @@ extern "C" fn m_trap(epc: usize,
 				// This is what I want so that I remember to remove this and replace
 				// them later.
 				delete_process((*frame).pid as u16);
-				let frame = schedule();
-				schedule_next_context_switch(1);
-				rust_switch_to_user(frame);
 			}
 			3 => {
 				// breakpoint
 				println!("BKPT\n\n");
-				return_pc += 2;
 			}
 			7 => unsafe {
 				println!("Error with pid {}, at PC 0x{:08x}, mepc 0x{:08x}", (*frame).pid, (*frame).pc, epc);
 				delete_process((*frame).pid as u16);
-				let frame = schedule();
-				schedule_next_context_switch(1);
-				rust_switch_to_user(frame);
 			}
-			8 | 9 | 11 => unsafe {
-				// Environment (system) call from User, Supervisor, and Machine modes
-				// println!("E-call from User mode! CPU#{} -> 0x{:08x}", hart, epc);
-				do_syscall(return_pc, frame);
-				let frame = schedule();
-				schedule_next_context_switch(1);
-				rust_switch_to_user(frame);
+			8 => unsafe {
+				user_syscall(epc, frame);
+			}
+			9 | 11 => unsafe {
+				machine_syscall(epc, frame);
 			}
 			// Page faults
 			12 => unsafe {
 				// Instruction page fault
 				println!("Instruction page fault CPU#{} -> 0x{:08x}: 0x{:08x}", hart, epc, tval);
 				delete_process((*frame).pid as u16);
-				let frame = schedule();
-				schedule_next_context_switch(1);
-				rust_switch_to_user(frame);
 			}
 			13 => unsafe {
 				// Load page fault
 				println!("Load page fault CPU#{} -> 0x{:08x}: 0x{:08x}", hart, epc, tval);
 				delete_process((*frame).pid as u16);
-				let frame = schedule();
-				schedule_next_context_switch(1);
-				rust_switch_to_user(frame);
 			}
 			15 => unsafe {
 				// Store page fault
 				println!("Store page fault CPU#{} -> 0x{:08x}: 0x{:08x}", hart, epc, tval);
 				delete_process((*frame).pid as u16);
-				let frame = schedule();
-				schedule_next_context_switch(1);
-				rust_switch_to_user(frame);
 			}
 			_ => {
 				panic!(
-				       "Unhandled sync trap {}. CPU#{} -> 0x{:08x}: 0x{:08x}\n",
-				       cause_num, hart, epc, tval
+						"Unhandled sync trap {}. CPU#{} -> 0x{:08x}: 0x{:08x}\n",
+						cause_num, hart, epc, tval
 				);
 			}
 		}
-	};
-	// Finally, return the updated program counter
-	return_pc
+		schedule_next_context_switch(1);
+		rust_switch_to_user(schedule());
+	}
 }
 
-pub const MMIO_MTIMECMP: *mut u64 = 0x0200_4000usize as *mut u64;
+pub const MMIO_MTIMECMP: *mut u64 = 0x0200_4000 as *mut u64;
 pub const MMIO_MTIME: *const u64 = 0x0200_BFF8 as *const u64;
 
 pub fn schedule_next_context_switch(qm: u16) {

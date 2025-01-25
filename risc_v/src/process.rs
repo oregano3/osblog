@@ -11,10 +11,12 @@ use crate::{cpu::{get_mtime,
             page::{dealloc,
                    unmap,
 				   zalloc,
-				   Table},
+				   Table, PAGE_SIZE, map, EntryBits},
             syscall::{syscall_exit, syscall_yield}};
 use alloc::{string::String, collections::{vec_deque::VecDeque, BTreeMap}};
+use alloc::boxed::Box;
 use core::ptr::null_mut;
+use crate::fd::DescriptorType;
 use crate::lock::Mutex;
 
 // How many pages are we going to give a process for their
@@ -386,6 +388,26 @@ pub struct Process {
 	pub brk:         usize,
 }
 
+impl Process {
+	/// Set the break to the given address. If the address is smaller than
+	/// the break already, do nothing. This function returns the address
+	/// where the break is.
+	pub fn set_brk(&mut self, addr: usize) -> usize {
+		if addr > self.brk && unsafe { (*self.frame).satp } >> 60 != 0 {
+			// MMU is turned on
+			let table = unsafe { self.mmu_table.as_mut().unwrap() };
+			let diff = (addr + PAGE_SIZE - self.brk) / PAGE_SIZE;
+			for i in 0..diff {
+				let new_addr = zalloc(1) as usize;
+				self.data.pages.push_back(new_addr);
+				map(table, self.brk + (i << 12), new_addr, EntryBits::UserReadWrite.val(), 0);
+			}
+			self.brk = addr;
+		}
+		self.brk
+	}
+}
+
 impl Drop for Process {
 	/// Since we're storing ownership of a Process in the linked list,
 	/// we can cause it to deallocate automatically when it is removed.
@@ -413,17 +435,6 @@ impl Drop for Process {
 	}
 }
 
-pub enum Descriptor {
-	File(Inode),
-	Device(usize),
-	Framebuffer,
-	ButtonEvents,
-	AbsoluteEvents,
-	Console,
-	Network,
-	Unknown,
-}
-
 // The private data in a process contains information
 // that is relevant to where we are, including the path
 // and open file descriptors.
@@ -432,7 +443,7 @@ pub enum Descriptor {
 #[allow(dead_code)]
 pub struct ProcessData {
 	pub environ: BTreeMap<String, String>,
-	pub fdesc: BTreeMap<u16, Descriptor>,
+	pub fdesc: BTreeMap<u16, DescriptorType>,
 	pub cwd: String,
 	pub pages: VecDeque<usize>,
 }
@@ -448,5 +459,17 @@ impl ProcessData {
 			cwd: String::from("/"),
 			pages: VecDeque::new(),
 		 }
+	}
+	/// Look for a new file descriptor. This can only return
+	/// file descriptors > 0.
+	pub fn find_next_fd(&self) -> u16 {
+		let mut ret = 0u16;
+		for i in self.fdesc.keys() {
+			let d = *i;
+			if d > ret {
+				ret = d;
+			}
+		}
+		ret + 1
 	}
 }

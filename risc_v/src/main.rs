@@ -109,11 +109,7 @@ extern "C" fn kinit() {
 	}
 	// Set up virtio. This requires a working heap and page-grained allocator.
 	virtio::probe();
-
 	console::init();
-	process::add_kernel_process(test::test);
-	// Get the GPU going
-	gpu::init(6);
 	// We schedule the next context switch using a multiplier of 1
 	// Block testing code removed.
 	trap::schedule_next_context_switch(1);
@@ -136,6 +132,7 @@ pub mod buffer;
 pub mod console;
 pub mod cpu;
 pub mod elf;
+pub mod fd;
 pub mod fs;
 pub mod gpu;
 pub mod input;
@@ -151,6 +148,5 @@ pub mod trap;
 pub mod uart;
 pub mod vfs;
 pub mod virtio;
-pub mod test;
 
 
